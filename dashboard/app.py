@@ -34,23 +34,33 @@ sector = st.sidebar.selectbox("Select Sector", list(SECTORS.keys()))
 ticker = st.sidebar.selectbox("Select Company", SECTORS[sector])
 
 
-# ------------------ LOAD DATA (STABLE VERSION) ------------------
+# ------------------ LOAD DATA (FIXED ⭐) ------------------
 @st.cache_data(ttl=60)
 def load_data(symbol):
-    return yf.download(symbol, period="1y", auto_adjust=True)
+    data = yf.download(symbol, period="1y", progress=False)
+
+    # ⭐ FIX multi index columns (yfinance new bug)
+    if isinstance(data.columns, pd.MultiIndex):
+        data.columns = data.columns.get_level_values(0)
+
+    return data
+
 
 data = load_data(ticker)
 
-if data.empty:
+if data is None or data.empty:
     st.error("❌ No data found. Try another stock.")
     st.stop()
 
 close = data["Close"]
 
+
 # ------------------ INDICATORS ------------------
 ma20 = moving_average(close)
 rsi_val = rsi(close)
-signal = buy_sell_signal(rsi_val.iloc[-1], close.iloc[-1], ma20.iloc[-1])
+
+# ⭐ FIXED signal call
+signal = buy_sell_signal(rsi_val.iloc[-1])
 
 
 # ------------------ METRICS ------------------
@@ -92,17 +102,11 @@ st.subheader("💼 Paper Trading (Simulation)")
 if "portfolio" not in st.session_state:
     st.session_state.portfolio = []
 
-qty = st.number_input(
-    "Quantity",
-    min_value=1,
-    max_value=10000,
-    value=1,
-    step=1
-)
+qty = st.number_input("Quantity", min_value=1, max_value=10000, value=1, step=1)
 
 col_buy, col_sell = st.columns(2)
 
-# ------------------ BUY ------------------
+# BUY
 with col_buy:
     if st.button("🟢 BUY STOCK"):
         st.session_state.portfolio.append({
@@ -113,7 +117,7 @@ with col_buy:
         st.success(f"Bought {qty} shares of {ticker}")
         st.rerun()
 
-# ------------------ SELL ------------------
+# SELL
 with col_sell:
     if st.button("🔴 SELL STOCK"):
         for item in st.session_state.portfolio:
@@ -131,7 +135,12 @@ if st.session_state.portfolio:
 
     current_prices = {}
     for stock_symbol in portfolio_df["Stock"].unique():
-        latest_data = yf.download(stock_symbol, period="1d", auto_adjust=True)
+        latest_data = yf.download(stock_symbol, period="1d", progress=False)
+
+        # ⭐ FIX multi index
+        if isinstance(latest_data.columns, pd.MultiIndex):
+            latest_data.columns = latest_data.columns.get_level_values(0)
+
         if not latest_data.empty:
             current_prices[stock_symbol] = latest_data["Close"].iloc[-1]
         else:
