@@ -1,26 +1,24 @@
 import sys
 import os
-
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
 import streamlit as st
 import yfinance as yf
 import pandas as pd
 
-
 from utils.indicators import moving_average, rsi
 from utils.signals import buy_sell_signal
 from model.lstm_model import lstm_predict
 
+
 # ------------------ PAGE CONFIG ------------------
 st.set_page_config(page_title="Invest Better Pro", layout="wide")
-
 st.title("📈 Invest Better – Advanced Live Dashboard")
 
-# ------------------ REFRESH ------------------
+
+# ------------------ MANUAL REFRESH ------------------
 if st.button("🔄 Refresh Dashboard"):
     st.rerun()
-
 
 
 # ------------------ SECTORS ------------------
@@ -35,28 +33,37 @@ SECTORS = {
 sector = st.sidebar.selectbox("Select Sector", list(SECTORS.keys()))
 ticker = st.sidebar.selectbox("Select Company", SECTORS[sector])
 
-# ------------------ LOAD DATA ------------------
-stock = yf.Ticker(ticker)
-data = stock.history(period="1y")
+
+# ------------------ LOAD DATA (STABLE VERSION) ------------------
+@st.cache_data(ttl=60)
+def load_data(symbol):
+    return yf.download(symbol, period="1y", auto_adjust=True)
+
+data = load_data(ticker)
 
 if data.empty:
-    st.error("No data found")
+    st.error("❌ No data found. Try another stock.")
     st.stop()
 
 close = data["Close"]
+
+# ------------------ INDICATORS ------------------
 ma20 = moving_average(close)
 rsi_val = rsi(close)
-
 signal = buy_sell_signal(rsi_val.iloc[-1], close.iloc[-1], ma20.iloc[-1])
+
 
 # ------------------ METRICS ------------------
 col1, col2, col3 = st.columns(3)
+
 col1.metric("Current Price", f"{close.iloc[-1]:.2f}")
 col2.metric("RSI", f"{rsi_val.iloc[-1]:.2f}")
 col3.metric("Signal", signal)
 
+
 # ------------------ CHARTS ------------------
 st.subheader("📉 Price + Moving Average")
+
 st.line_chart(pd.DataFrame({
     "Price": close,
     "MA20": ma20
@@ -65,10 +72,16 @@ st.line_chart(pd.DataFrame({
 st.subheader("📊 RSI Indicator")
 st.line_chart(rsi_val)
 
+
 # ------------------ LSTM PREDICTION ------------------
 st.subheader("🤖 LSTM Price Prediction")
-pred_price = lstm_predict(close.values)
-st.success(f"Predicted Next Price: {pred_price:.2f}")
+
+try:
+    pred_price = lstm_predict(close.values)
+    st.success(f"Predicted Next Price: {pred_price:.2f}")
+except:
+    st.warning("LSTM prediction failed.")
+
 
 # =====================================================
 # ================== PAPER TRADING ====================
@@ -76,7 +89,6 @@ st.success(f"Predicted Next Price: {pred_price:.2f}")
 
 st.subheader("💼 Paper Trading (Simulation)")
 
-# Initialize portfolio
 if "portfolio" not in st.session_state:
     st.session_state.portfolio = []
 
@@ -111,18 +123,24 @@ with col_sell:
                 st.rerun()
                 break
 
+
 # ------------------ PORTFOLIO DISPLAY ------------------
 if st.session_state.portfolio:
+
     portfolio_df = pd.DataFrame(st.session_state.portfolio)
 
-    # Fetch latest prices
     current_prices = {}
     for stock_symbol in portfolio_df["Stock"].unique():
-        current_prices[stock_symbol] = yf.Ticker(stock_symbol).history(period="1d")["Close"].iloc[-1]
+        latest_data = yf.download(stock_symbol, period="1d", auto_adjust=True)
+        if not latest_data.empty:
+            current_prices[stock_symbol] = latest_data["Close"].iloc[-1]
+        else:
+            current_prices[stock_symbol] = portfolio_df.loc[
+                portfolio_df["Stock"] == stock_symbol, "Buy Price"
+            ].iloc[0]
 
     portfolio_df["Current Price"] = portfolio_df["Stock"].map(current_prices)
 
-    # Profit/Loss
     portfolio_df["P/L"] = (
         (portfolio_df["Current Price"] - portfolio_df["Buy Price"])
         * portfolio_df["Qty"]
@@ -136,6 +154,7 @@ if st.session_state.portfolio:
 
 else:
     st.info("No stocks in portfolio yet.")
+
 
 # ------------------ RECENT DATA ------------------
 st.subheader("📄 Recent Data")
