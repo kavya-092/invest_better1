@@ -6,7 +6,7 @@ sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 import streamlit as st
 import yfinance as yf
 import pandas as pd
-from streamlit_autorefresh import st_autorefresh
+
 
 from utils.indicators import moving_average, rsi
 from utils.signals import buy_sell_signal
@@ -21,7 +21,7 @@ st.title("📈 Invest Better – Advanced Live Dashboard")
 if st.button("🔄 Refresh Dashboard"):
     st.rerun()
 
-st_autorefresh(interval=30000, key="refresh")  # Auto refresh every 30 sec
+
 
 # ------------------ SECTORS ------------------
 SECTORS = {
