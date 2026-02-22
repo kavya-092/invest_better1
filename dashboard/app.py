@@ -7,7 +7,7 @@ import yfinance as yf
 import pandas as pd
 import matplotlib.pyplot as plt
 
-from utils.indicators import moving_average, rsi
+from utils.indicators import calculate_ma, calculate_rsi
 from utils.signals import buy_sell_signal
 from model.lstm_model import lstm_predict
 
@@ -47,8 +47,8 @@ if data.empty:
     st.stop()
 
 close = data["Close"]
-ma20 = moving_average(close)
-rsi_val = rsi(close)
+ma20 = calculate_ma(close)
+rsi_val = calculate_rsi(close)
 
 signal = buy_sell_signal(rsi_val.iloc[-1], close.iloc[-1], ma20.iloc[-1])
 
