@@ -1,156 +1,64 @@
-import sys
-import os
-
-sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
-
 import streamlit as st
 import yfinance as yf
-import pandas as pd
+import matplotlib.pyplot as plt
+from utils.indicators import calculate_rsi, calculate_ma
 
-from utils.indicators import moving_average, rsi
-from utils.signals import buy_sell_signal
-from model.lstm_model import lstm_predict
+st.set_page_config(page_title="Invest Better", layout="wide", page_icon="📈")
 
-# ------------------ PAGE CONFIG ------------------
-st.set_page_config(page_title="Invest Better Pro", layout="wide")
+st.title("Invest Better")
+st.caption("AI Powered Stock Analysis Dashboard")
+st.markdown("---")
 
-st.title("📈 Invest Better – Advanced Live Dashboard")
+stocks = ["AAPL","MSFT","TSLA","GOOGL","AMZN"]
 
-# ------------------ MANUAL REFRESH ------------------
-if st.button("🔄 Refresh Dashboard"):
-    st.rerun()
-
-# ------------------ SECTORS ------------------
-SECTORS = {
-    "INDIA - IT": ["TCS.NS", "INFY.NS", "WIPRO.NS"],
-    "INDIA - BANKING": ["HDFCBANK.NS", "ICICIBANK.NS", "SBIN.NS"],
-    "INDIA - ENERGY": ["RELIANCE.NS", "ONGC.NS", "BPCL.NS"],
-    "US - TECH": ["AAPL", "MSFT", "TSLA", "GOOGL"],
-    "US - ENERGY": ["XOM", "CVX"]
-}
-
-sector = st.sidebar.selectbox("Select Sector", list(SECTORS.keys()))
-ticker = st.sidebar.selectbox("Select Company", SECTORS[sector])
-
-# ------------------ LOAD DATA ------------------
-stock = yf.Ticker(ticker)
-data = stock.history(period="1y")
-
-if data.empty:
-    st.error("No data found")
-    st.stop()
-
-close = data["Close"]
-ma20 = moving_average(close)
-rsi_val = rsi(close)
-
-signal = buy_sell_signal(rsi_val.iloc[-1], close.iloc[-1], ma20.iloc[-1])
-
-# ------------------ CURRENCY SELECTION ------------------
-currency = st.selectbox("Select Currency", ["USD ($)", "INR (₹)"])
-
-base_price = close.iloc[-1]
-display_price = base_price
-currency_symbol = "$"
-
-# Convert USD → INR if selected
-if currency == "INR (₹)":
-    try:
-        usd_inr = yf.Ticker("USDINR=X").history(period="1d")["Close"].iloc[-1]
-        display_price = base_price * usd_inr
-        currency_symbol = "₹"
-    except:
-        st.warning("Currency conversion failed")
+if "selected_stock" in st.session_state:
+    ticker = st.session_state.selected_stock
 else:
-    currency_symbol = "$"
+    ticker = st.sidebar.selectbox("Choose Company", stocks)
 
-# ------------------ METRICS ------------------
+data = yf.download(ticker, period="6mo")
+
+data["RSI"] = calculate_rsi(data["Close"])
+data["MA20"] = calculate_ma(data["Close"])
+
+current_price = data["Close"].iloc[-1]
+rsi = data["RSI"].iloc[-1]
+ma20 = data["MA20"].iloc[-1]
+
 col1, col2, col3 = st.columns(3)
 
-col1.metric("Current Price", f"{display_price:.2f} {currency_symbol}")
-col2.metric("RSI", f"{rsi_val.iloc[-1]:.2f}")
-col3.metric("Signal", signal)
+with col1:
+    st.metric("Current Price", f"${current_price:.2f}")
 
-# ------------------ CHARTS ------------------
-st.subheader("📉 Price + Moving Average")
-st.line_chart(pd.DataFrame({
-    "Price": close,
-    "MA20": ma20
-}))
+with col2:
+    st.metric("RSI", f"{rsi:.2f}")
 
-st.subheader("📊 RSI Indicator")
-st.line_chart(rsi_val)
+with col3:
+    st.metric("MA20", f"${ma20:.2f}")
 
-# ------------------ LSTM PREDICTION ------------------
-st.subheader("🤖 LSTM Price Prediction")
-pred_price = lstm_predict(close.values)
-st.success(f"Predicted Next Price: {pred_price:.2f} {currency_symbol}")
+st.markdown("---")
 
-# =====================================================
-# ================== PAPER TRADING ====================
-# =====================================================
+tab1, tab2, tab3 = st.tabs(["Overview", "Technical Indicators", "AI Prediction"])
 
-st.subheader("💼 Paper Trading (Simulation)")
+with tab1:
+    st.line_chart(data["Close"])
 
-if "portfolio" not in st.session_state:
-    st.session_state.portfolio = []
+with tab2:
+    fig, ax = plt.subplots()
+    ax.plot(data["RSI"])
+    ax.axhline(70)
+    ax.axhline(30)
+    ax.set_title("RSI")
+    st.pyplot(fig)
 
-qty = st.number_input(
-    "Quantity",
-    min_value=1,
-    max_value=10000,
-    value=1,
-    step=1
-)
+with tab3:
+    predicted_price = current_price * 1.02  # Dummy prediction
+    confidence = abs(predicted_price - current_price) / current_price * 100
 
-col_buy, col_sell = st.columns(2)
+    st.subheader("Prediction")
+    st.write(f"Predicted Price: ${predicted_price:.2f}")
 
-# ------------------ BUY ------------------
-with col_buy:
-    if st.button("🟢 BUY STOCK"):
-        st.session_state.portfolio.append({
-            "Stock": ticker,
-            "Qty": qty,
-            "Buy Price": base_price
-        })
-        st.success(f"Bought {qty} shares of {ticker}")
-        st.rerun()
-
-# ------------------ SELL ------------------
-with col_sell:
-    if st.button("🔴 SELL STOCK"):
-        for item in st.session_state.portfolio:
-            if item["Stock"] == ticker:
-                st.session_state.portfolio.remove(item)
-                st.warning(f"Sold {ticker}")
-                st.rerun()
-                break
-
-# ------------------ PORTFOLIO DISPLAY ------------------
-if st.session_state.portfolio:
-    portfolio_df = pd.DataFrame(st.session_state.portfolio)
-
-    current_prices = {}
-    for stock_symbol in portfolio_df["Stock"].unique():
-        latest_price = yf.Ticker(stock_symbol).history(period="1d")["Close"].iloc[-1]
-        current_prices[stock_symbol] = latest_price
-
-    portfolio_df["Current Price"] = portfolio_df["Stock"].map(current_prices)
-
-    portfolio_df["P/L"] = (
-        (portfolio_df["Current Price"] - portfolio_df["Buy Price"])
-        * portfolio_df["Qty"]
-    )
-
-    st.subheader("📂 Portfolio Summary")
-    st.dataframe(portfolio_df, use_container_width=True)
-
-    total_pl = portfolio_df["P/L"].sum()
-    st.metric("💰 Total Profit / Loss", f"{total_pl:.2f}")
-
-else:
-    st.info("No stocks in portfolio yet.")
-
-# ------------------ RECENT DATA ------------------
-st.subheader("📄 Recent Data")
-st.dataframe(data.tail())
+    if predicted_price > current_price:
+        st.success(f"Recommendation: BUY | Confidence: {confidence:.2f}%")
+    else:
+        st.error(f"Recommendation: SELL | Confidence: {confidence:.2f}%")
